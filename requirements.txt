@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+streamlit
+scikit-learn
+python-dotenv
+python-multipart
+requests
+numpy
