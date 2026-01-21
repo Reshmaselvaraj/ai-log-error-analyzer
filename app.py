@@ -1,7 +1,7 @@
 import streamlit as st
 import requests
 
-API_URL = "API_URL = "https://ai-log-error-analyzer.onrender.com/analyze"
+API_URL = "API_URL = "https://ai-log-error-analyzer.onrender.com/analyzer"
 
 st.title("AI Log Error Analyzer")
 
