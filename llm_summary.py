@@ -1,77 +1,74 @@
 import os
-from dotenv import load_dotenv
-from openai import OpenAI
 
-# Load environment variables from .env file
-load_dotenv()
-
-# Initialize OpenAI client using API key from environment
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
 
 
-def generate_incident_summary(log_entries):
+def generate_incident_summary(logs):
     """
-    Generate a human-readable incident summary from structured log entries.
-
-    log_entries: list of dicts with keys:
-        - timestamp
-        - level
-        - category
-        - severity
-        - message
+    Generate an incident summary using an LLM if available.
+    Falls back to deterministic summary if LLM is unavailable.
     """
 
-    # Build context from structured logs
-    context = "\n".join([
-        f"- [{entry['level']}] {entry['category']} | "
-        f"Severity: {entry['severity']} | "
-        f"{entry['message']}"
-        for entry in log_entries
-    ])
+    api_key = os.getenv("OPENAI_API_KEY")
 
-    prompt = f"""
-You are a technical support assistant.
+    # -----------------------------
+    # Fallback summary (SAFE DEFAULT)
+    # -----------------------------
+    def fallback_summary():
+        total = len(logs)
+        high = sum(1 for l in logs if l["severity"] == "HIGH")
+        medium = sum(1 for l in logs if l["severity"] == "MEDIUM")
+        low = sum(1 for l in logs if l["severity"] == "LOW")
 
-Summarize the following incident logs into:
-1. Incident Overview
-2. Impact
-3. Recommended Next Action
+        return f"""
+LLM unavailable. Generated fallback incident summary.
 
-Keep the summary concise, factual, and suitable for sharing with engineers
-and stakeholders.
+Incident Overview:
+- Total events: {total}
+- High severity events: {high}
+- Medium severity events: {medium}
+- Low severity events: {low}
 
-Logs:
-{context}
-"""
+Recommended Next Actions:
+- Investigate high severity errors first
+- Review recurring database, memory, or timeout issues
+- Monitor system stability after remediation
+""".strip()
 
+    # -----------------------------
+    # If OpenAI is not usable → fallback
+    # -----------------------------
+    if OpenAI is None or not api_key:
+        return fallback_summary()
+
+    # -----------------------------
+    # LLM-based summary
+    # -----------------------------
     try:
+        client = OpenAI(api_key=api_key)
+
+        context = "\n".join(
+            f"[{l['level']}] {l['message']}" for l in logs[:50]
+        )
+
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "user", "content": prompt}
+                {
+                    "role": "system",
+                    "content": "You are an SRE assistant summarizing incidents from logs.",
+                },
+                {
+                    "role": "user",
+                    "content": f"Summarize the following logs:\n{context}",
+                },
             ],
-            temperature=0.2
         )
 
         return response.choices[0].message.content
 
     except Exception:
-        # -----------------------------
-        # FALLBACK SUMMARY (NO LLM)
-        # -----------------------------
-        high = sum(1 for e in log_entries if e["severity"] == "HIGH")
-        medium = sum(1 for e in log_entries if e["severity"] == "MEDIUM")
-        low = sum(1 for e in log_entries if e["severity"] == "LOW")
-
-        return (
-            "LLM unavailable. Generated fallback incident summary.\n\n"
-            "Incident Overview:\n"
-            f"- Total events: {len(log_entries)}\n"
-            f"- High severity events: {high}\n"
-            f"- Medium severity events: {medium}\n"
-            f"- Low severity events: {low}\n\n"
-            "Recommended Next Action:\n"
-            "- Investigate high severity errors first\n"
-            "- Review database, memory, and timeout related issues\n"
-            "- Monitor system stability after remediation\n"
-        )
+        return fallback_summary()
